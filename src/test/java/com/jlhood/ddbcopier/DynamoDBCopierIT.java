@@ -37,29 +37,62 @@ public class DynamoDBCopierIT {
     public void setup() throws Exception {
         ddb = AmazonDynamoDBClientBuilder.standard().build();
         testStackHelper = new TestStackHelper(AmazonCloudFormationClientBuilder.standard().build());
+        deleteAllItems(testStackHelper.getSourceTableName());
+        deleteAllItems(testStackHelper.getCopyTableName());
+        deleteAllItems(testStackHelper.getUpdateTableName());
     }
 
     @Test
-    public void endToEnd() throws Exception {
+    public void endToEndPut() throws Exception {
         List<Map<String, AttributeValue>> writtenRecords = generateTestRecords(13);
         writtenRecords.stream()
                 .map(this::toPutItemRequest)
                 .forEach(ddb::putItem);
 
-        ScanResult scanResult = waitForCopyComplete(13);
+        ScanResult scanResult = waitForCopyComplete(testStackHelper.getCopyTableName(), 13);
         List<Map<String, AttributeValue>> copiedRecords = scanResult.getItems();
 
         assertThat(ImmutableSet.copyOf(copiedRecords), is(ImmutableSet.copyOf(writtenRecords)));
 
         Map<String, AttributeValue> item = writtenRecords.get(0);
-        item.put("attribute", new AttributeValue("modified"));
+        item.put("attribute1", new AttributeValue("modified"));
+        item.remove("attribute2");
         ddb.putItem(toPutItemRequest(item));
 
-        GetItemResult getItemResult = waitForItemModified(item);
+        GetItemResult getItemResult = waitForItemModified(testStackHelper.getCopyTableName(), item);
         assertThat(getItemResult.getItem(), is(item));
 
         ddb.deleteItem(testStackHelper.getSourceTableName(), toKey(item));
-        waitForItemDeleted(item);
+        waitForItemDeleted(testStackHelper.getCopyTableName(), item);
+    }
+
+    @Test
+    public void endToEndUpdate() throws Exception {
+        List<Map<String, AttributeValue>> writtenRecords = generateTestRecords(13);
+        writtenRecords.stream()
+                .map(this::toPutItemRequest)
+                .forEach(ddb::putItem);
+
+        ScanResult scanResult = waitForCopyComplete(testStackHelper.getUpdateTableName(),13);
+        List<Map<String, AttributeValue>> copiedRecords = scanResult.getItems();
+
+        assertThat(ImmutableSet.copyOf(copiedRecords), is(ImmutableSet.copyOf(writtenRecords)));
+
+        Map<String, AttributeValue> item = writtenRecords.get(0);
+        Map<String, AttributeValue> expectedItem = new HashMap<>(item);
+
+        item.put("attribute1", new AttributeValue("modified"));
+        item.remove("attribute2");
+        ddb.putItem(toPutItemRequest(item));
+
+        expectedItem.put("attribute1", new AttributeValue("modified"));
+        // expect attribute2 to still exist when updating
+
+        GetItemResult getItemResult = waitForItemModified(testStackHelper.getUpdateTableName(), expectedItem);
+        assertThat(getItemResult.getItem(), is(expectedItem));
+
+        ddb.deleteItem(testStackHelper.getSourceTableName(), toKey(item));
+        waitForItemDeleted(testStackHelper.getUpdateTableName(), item);
     }
 
     private List<Map<String, AttributeValue>> generateTestRecords(int count) {
@@ -67,7 +100,8 @@ public class DynamoDBCopierIT {
         for (int i = 0; i < count; i++) {
             Map<String, AttributeValue> record = new HashMap<>();
             record.put("id", new AttributeValue("id-" + i));
-            record.put("attribute", new AttributeValue("attribute-" + i));
+            record.put("attribute1", new AttributeValue("attribute1-" + i));
+            record.put("attribute2", new AttributeValue("attribute2-" + i));
             records.add(record);
         }
         return records;
@@ -79,8 +113,8 @@ public class DynamoDBCopierIT {
                 .withItem(record);
     }
 
-    private ScanResult waitForCopyComplete(int expectedNumItems) {
-        return waitUntil(scanTable(testStackHelper.getCopyTableName()),
+    private ScanResult waitForCopyComplete(String tableName, int expectedNumItems) {
+        return waitUntil(scanTable(tableName),
                 scanResult -> {
                     log.info("Waiting for copy completion: {} records expected, {} records found", expectedNumItems, scanResult.getCount());
                     return scanResult.getCount() == expectedNumItems;
@@ -91,11 +125,11 @@ public class DynamoDBCopierIT {
 
     private Supplier<ScanResult> scanTable(String tableName) {
         return () -> ddb.scan(new ScanRequest(tableName)
-                .withLimit(20));
+                .withLimit(100));
     }
 
-    private GetItemResult waitForItemModified(Map<String, AttributeValue> item) {
-        return waitUntil(getItem(testStackHelper.getCopyTableName(), toKey(item)),
+    private GetItemResult waitForItemModified(String tableName, Map<String, AttributeValue> item) {
+        return waitUntil(getItem(tableName, toKey(item)),
                 result -> {
                     log.info("waiting for modified item to be copied: expected={}, actual={}", item, result.getItem());
                     return item.equals(result.getItem());
@@ -112,13 +146,19 @@ public class DynamoDBCopierIT {
         return () -> ddb.getItem(tableName, key);
     }
 
-    private GetItemResult waitForItemDeleted(Map<String, AttributeValue> item) {
-        return waitUntil(getItem(testStackHelper.getCopyTableName(), toKey(item)),
+    private GetItemResult waitForItemDeleted(String tableName, Map<String, AttributeValue> item) {
+        return waitUntil(getItem(tableName, toKey(item)),
                 result -> {
                     log.info("waiting for item to be deleted");
                     return result.getItem() == null;
                 },
                 180000,
                 "Timed out waiting for item deletion to complete");
+    }
+
+    private void deleteAllItems(String tableName) {
+        ScanResult scanResult = scanTable(tableName).get();
+        scanResult.getItems().forEach(m -> ddb.deleteItem(tableName, toKey(m)));
+        scanResult.getItems().forEach(m -> waitForItemDeleted(tableName, m));
     }
 }

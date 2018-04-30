@@ -21,8 +21,11 @@ export LANG=en_US.UTF-8
 test_environment_stack_name="integ-test-environment-${TRAVIS_BUILD_ID}"
 app_stack_name="integ-test-app-${TRAVIS_BUILD_ID}"
 
-echo "Deleting app stack: $app_stack_name"
-aws cloudformation delete-stack --stack-name $app_stack_name
+echo "Deleting app stack: ${app_stack_name}-put"
+aws cloudformation delete-stack --stack-name ${app_stack_name}-put
+
+echo "Deleting app stack: ${app_stack_name}-update"
+aws cloudformation delete-stack --stack-name ${app_stack_name}-update
 
 echo "Deleting test environment stack: $test_environment_stack_name"
 aws cloudformation delete-stack --stack-name $test_environment_stack_name

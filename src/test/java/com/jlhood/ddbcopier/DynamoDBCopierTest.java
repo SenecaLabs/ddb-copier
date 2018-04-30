@@ -8,13 +8,13 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
-import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-import com.amazonaws.services.dynamodbv2.model.PutItemRequest;
-import com.amazonaws.services.dynamodbv2.model.StreamRecord;
+import com.amazonaws.services.dynamodbv2.model.*;
 import com.amazonaws.services.lambda.runtime.events.DynamodbEvent;
 
 import com.google.common.collect.ImmutableMap;
 
+import com.jlhood.ddbcopier.transformers.Put;
+import com.jlhood.ddbcopier.transformers.Update;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.InOrder;
@@ -35,7 +35,7 @@ public class DynamoDBCopierTest {
     @Before
     public void setup() throws Exception {
         MockitoAnnotations.initMocks(this);
-        copier = new DynamoDBCopier(DESTINATION_TABLE, amazonDynamoDB);
+        copier = new DynamoDBCopier(DESTINATION_TABLE, amazonDynamoDB, new Put());
     }
 
     @Test(expected = IllegalStateException.class)
@@ -69,6 +69,31 @@ public class DynamoDBCopierTest {
 
         inOrder.verify(amazonDynamoDB).deleteItem(DESTINATION_TABLE, ImmutableMap.of("a", new AttributeValue("b")));
         inOrder.verify(amazonDynamoDB).deleteItem(DESTINATION_TABLE, ImmutableMap.of("c", new AttributeValue("d")));
+    }
+
+    @Test
+    public void accept_insert_with_update_method() throws Exception {
+        copier = new DynamoDBCopier(DESTINATION_TABLE, amazonDynamoDB, new Update());
+
+        copier.accept(buildDynamoDbEvent("INSERT",
+                streamRecord(attributeValue("k", "1"), attributeValue("a", "b")),
+                streamRecord(attributeValue("k", "1"), attributeValue("c", "d"))));
+
+        InOrder inOrder = inOrder(amazonDynamoDB);
+
+        inOrder.verify(amazonDynamoDB).updateItem(new UpdateItemRequest()
+                .withTableName(DESTINATION_TABLE)
+                .withKey(ImmutableMap.of("k", new AttributeValue("1")))
+                .withUpdateExpression("SET #name0 = :value0")
+                .withExpressionAttributeNames(ImmutableMap.of("#name0", "a"))
+                .withExpressionAttributeValues(ImmutableMap.of(":value0", new AttributeValue("b"))));
+
+        inOrder.verify(amazonDynamoDB).updateItem(new UpdateItemRequest()
+                .withTableName(DESTINATION_TABLE)
+                .withKey(ImmutableMap.of("k", new AttributeValue("1")))
+                .withUpdateExpression("SET #name0 = :value0")
+                .withExpressionAttributeNames(ImmutableMap.of("#name0", "c"))
+                .withExpressionAttributeValues(ImmutableMap.of(":value0", new AttributeValue("d"))));
     }
 
     private DynamodbEvent buildDynamoDbEvent(String eventName, StreamRecord... records) {

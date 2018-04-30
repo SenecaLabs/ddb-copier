@@ -19,6 +19,7 @@ class TestStackHelper {
     private static final String INTEG_TEST_ENVIRONMENT_STACK_NAME = "integ-test-environment-" + System.getenv("TRAVIS_BUILD_ID");
     private static final String SOURCE_TABLE_NAME_OUTPUT_KEY = "SourceTableName";
     private static final String COPY_TABLE_NAME_OUTPUT_KEY = "CopyTableName";
+    private static final String UPDATE_TABLE_NAME_OUTPUT_KEY = "UpdateTableName";
 
     private final Table<String, String, String> cache = HashBasedTable.create();
     private final AmazonCloudFormation cloudFormation;
@@ -29,6 +30,10 @@ class TestStackHelper {
 
     String getCopyTableName() {
         return getStackOutput(INTEG_TEST_ENVIRONMENT_STACK_NAME, COPY_TABLE_NAME_OUTPUT_KEY);
+    }
+
+    String getUpdateTableName() {
+        return getStackOutput(INTEG_TEST_ENVIRONMENT_STACK_NAME, UPDATE_TABLE_NAME_OUTPUT_KEY);
     }
 
     private String getStackOutput(String stackName, String outputKey) {

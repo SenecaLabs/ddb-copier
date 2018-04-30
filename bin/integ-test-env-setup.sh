@@ -30,6 +30,7 @@ test_environment_stack_outputs=$(aws cloudformation describe-stacks --stack-name
 source_table_name=$(echo $test_environment_stack_outputs | jq -er '.[] | select(.OutputKey | contains("SourceTableName")) | .OutputValue')
 source_table_stream_arn=$(echo $test_environment_stack_outputs | jq -er '.[] | select(.OutputKey | contains("SourceTableStreamArn")) | .OutputValue')
 copy_table_name=$(echo $test_environment_stack_outputs | jq -er '.[] | select(.OutputKey | contains("CopyTableName")) | .OutputValue')
+update_table_name=$(echo $test_environment_stack_outputs | jq -er '.[] | select(.OutputKey | contains("UpdateTableName")) | .OutputValue')
 
 echo "Packaging app template"
 output_template_path=target/package_template.yml
@@ -38,9 +39,16 @@ aws cloudformation package \
   --output-template-file $output_template_path \
   --s3-bucket $PACKAGING_S3_BUCKET
 
-echo "Deploying app stack: $app_stack_name"
+echo "Deploying app stack: ${app_stack_name}-put"
 aws cloudformation deploy \
   --template-file $output_template_path \
-  --stack-name $app_stack_name \
+  --stack-name ${app_stack_name}-put \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides SourceTableStreamARN="$source_table_stream_arn" DestinationTableName="$copy_table_name"
+
+echo "Deploying app stack: ${app_stack_name}-update"
+aws cloudformation deploy \
+  --template-file $output_template_path \
+  --stack-name ${app_stack_name}-update \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides SourceTableStreamARN="$source_table_stream_arn" DestinationTableName="$update_table_name" TransformClass=Update

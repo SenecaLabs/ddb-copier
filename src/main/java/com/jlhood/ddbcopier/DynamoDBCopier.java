@@ -1,15 +1,18 @@
 package com.jlhood.ddbcopier;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
-import com.amazonaws.services.dynamodbv2.model.PutItemRequest;
+import com.amazonaws.services.dynamodbv2.model.*;
 import com.amazonaws.services.lambda.runtime.events.DynamodbEvent;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 
+import com.jlhood.ddbcopier.transformers.Transformer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,6 +29,7 @@ public class DynamoDBCopier implements Consumer<DynamodbEvent> {
 
     private final String destinationTable;
     private final AmazonDynamoDB amazonDynamoDB;
+    private final Transformer transformer;
 
     @Override
     public void accept(final DynamodbEvent dynamodbEvent) {
@@ -55,9 +59,42 @@ public class DynamoDBCopier implements Consumer<DynamodbEvent> {
     }
 
     private void putRecord(final DynamodbEvent.DynamodbStreamRecord record) {
-        log.info("Creating or updating record: {}", record.getDynamodb().getKeys());
+        Map<String, AttributeValue> key = record.getDynamodb().getKeys();
+        log.info("Creating or updating record: {}", key);
+        Map<String, AttributeValue> newValues = transformer.transform(record.getDynamodb().getNewImage());
+
+        if (transformer.getWriteType() == Transformer.WriteType.UPDATE) {
+            StringBuilder updateExpr = new StringBuilder();
+            Map<String, String> attribNames = new HashMap<>();
+            Map<String, AttributeValue> attribValues = new HashMap<>();
+            int i = 0;
+            for (Map.Entry<String, AttributeValue> e : newValues.entrySet()) {
+                if (key.keySet().contains(e.getKey())) {
+                    continue;
+                }
+                String n = "#name" + i;
+                String v = ":value" + i;
+                attribNames.put(n, e.getKey());
+                attribValues.put(v, e.getValue());
+                if (updateExpr.length() == 0) {
+                    updateExpr.append("SET ");
+                } else {
+                    updateExpr.append(", ");
+                }
+                updateExpr.append(n).append(" = ").append(v);
+                i++;
+            }
+            amazonDynamoDB.updateItem(new UpdateItemRequest()
+                    .withTableName(destinationTable)
+                    .withKey(key)
+                    .withUpdateExpression(updateExpr.toString())
+                    .withExpressionAttributeNames(attribNames)
+                    .withExpressionAttributeValues(attribValues));
+            return;
+        }
+
         amazonDynamoDB.putItem(new PutItemRequest()
                 .withTableName(destinationTable)
-                .withItem(record.getDynamodb().getNewImage()));
+                .withItem(newValues));
     }
 }
