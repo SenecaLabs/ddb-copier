@@ -31,6 +31,9 @@ if [ -z "$DEST_TABLE_NAME" ]; then
   exit 1
 fi
 
+echo Building app...
+mvn clean package
+
 echo "Packaging app template"
 output_template_path=target/package_template.yml
 aws cloudformation package \
